@@ -235,3 +235,77 @@ def find_caplet_implied_vol(df, maturity, strike, market_price,
 
     return brentq(error, 1e-6, 5.0)
 
+
+def find_forward_swap_rate(rate_infos, t, t_forward, maturity, freq=4):
+    """
+    Compute forward swap rate starting at t_forward
+    and ending at maturity.
+
+    Parameters
+    ----------
+    rate_infos : DataFrame
+        Must contain:
+            - "tenor"
+            - "discounts"
+
+    t : float
+        Valuation time (usually 0).
+
+    t_forward : float
+        Swap start time (option expiry).
+
+    maturity : float
+        Swap end time.
+
+    freq : int
+        Payment frequency (4=quarterly, 2=semiannual).
+
+    Returns
+    -------
+    float
+        Forward swap rate.
+    """
+
+    df = rate_infos.copy()
+
+    Z_fwd = df.loc[np.isclose(df["tenor"], t_forward), "discounts"].values[0]
+    Z_T = df.loc[np.isclose(df["tenor"], maturity), "discounts"].values[0]
+
+    delta = 1 / freq
+    payment_dates = np.arange(t_forward + delta, maturity + 1e-10, delta)
+
+    annuity = 0.0
+    for T_i in payment_dates:
+        Z_i = df.loc[np.isclose(df["tenor"], T_i), "discounts"].values[0]
+        annuity += Z_i
+
+    forward_swap_rate = freq * (Z_fwd - Z_T) / annuity
+
+    return forward_swap_rate
+
+
+def compute_swap_annuity(rate_infos, t_forward, maturity, freq=4):
+    df = rate_infos.copy()
+    
+    delta = 1 / freq
+    payment_dates = np.arange(t_forward + delta, maturity + 1e-10, delta)
+    
+    annuity = 0.0
+    for T_i in payment_dates:
+        Z_i = df.loc[np.isclose(df["tenor"], T_i), "discounts"].values[0]
+        annuity += delta * Z_i
+    
+    return annuity
+
+
+def black_swaption_price(F, K, sigma, T, annuity, notional=1.0, payer=True):
+    d1 = (np.log(F / K) + 0.5 * sigma**2 * T) / (sigma * np.sqrt(T))
+    d2 = d1 - sigma * np.sqrt(T)
+
+    if payer:
+        price = notional * annuity * (F * norm.cdf(d1) - K * norm.cdf(d2))
+    else:
+        price = notional * annuity * (K * norm.cdf(-d2) - F * norm.cdf(-d1))
+
+    return price
+    
