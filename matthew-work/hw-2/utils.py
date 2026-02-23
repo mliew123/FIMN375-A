@@ -4,7 +4,7 @@ from scipy.stats import norm
 from scipy.optimize import brentq
 
 
-def price_floorlet(df, maturity, strike, delta=0.25, notional=100):
+def price_floorlet(df, maturity, strike, implied_vol, delta=0.25, notional=100):
     """
     Price a single floorlet using Black's model.
 
@@ -57,16 +57,60 @@ def price_floorlet(df, maturity, strike, delta=0.25, notional=100):
     # Forward rate for [T-0.25, T]
     F = df.loc[df["tenor"] == maturity, "forwards"].values[0]
     # Forward vol
-    sigma = df.loc[df["tenor"] == maturity, "fwd vols"].values[0]
     # Black d1, d2
-    d1 = (np.log(F / strike) + 0.5 * sigma**2 * tau) / (sigma * np.sqrt(tau))
-    d2 = d1 - sigma * np.sqrt(tau)
+    d1 = (np.log(F / strike) + 0.5 * implied_vol**2 * tau) / (implied_vol * np.sqrt(tau))
+    d2 = d1 - implied_vol * np.sqrt(tau)
     
     # Black floorlet formula (put)
     price = notional * delta * Z * (
         strike * norm.cdf(-d2) - F * norm.cdf(-d1)
     )
     return price
+
+def price_floor(df, maturity, strike, implied_vol):
+    expirations = np.arange(2, maturity*4+1) / 4
+    floor_price = 0
+    for exp in expirations:
+        floor_price += price_floorlet(df, exp, strike, implied_vol)
+
+    return floor_price
+
+def rates_to_disc_factors(tenor, discount_rates, freq=4, continous = False):
+    discount_factors = []
+    for i in range(len(discount_rates)):
+        if continous:
+            discount_factors.append(np.e ** (-discount_rates[i] * tenor[i]))
+        else:
+            discount_factors.append((1/(1 + discount_rates[i]/freq))**(freq * tenor[i]))
+
+    return discount_factors
+
+def compute_forwards(rate_data):
+    """
+    Compute forward rates from discount factors.
+
+    Assumes:
+        rate_data has columns:
+            - "tenor"
+            - "discounts"
+    Returns:
+        numpy array of forward rates
+    """
+
+    df = rate_data.copy().sort_values("tenor").reset_index(drop=True)
+
+    tenors = df["tenor"].values
+    discounts = df["discounts"].values
+
+    forwards = np.zeros(len(tenors))
+    forwards[0] = np.nan  # no forward for first point
+
+    for i in range(1, len(tenors)):
+        delta = tenors[i] - tenors[i-1]
+        forwards[i] = (discounts[i-1] / discounts[i] - 1) / delta
+
+    return forwards
+
 
 
 def price_caplet(df, maturity, strike, implied_vol, delta=0.25, notional=100):
